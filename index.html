@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CANTILEVER — Neural Sentiment Analysis</title>
+  <meta name="description" content="AI-powered movie review sentiment analyser. Paste any review and get an instant Positive or Negative verdict from a PyTorch LSTM trained on 50,000 IMDB reviews." />
+
+  <!-- ── CDN Engines ─────────────────────────────────────────────────────── -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- ── Tailwind Config ─────────────────────────────────────────────────── -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["Inter", "system-ui", "sans-serif"],
+            mono: ["JetBrains Mono", "monospace"],
+          },
+          colors: {
+            brand:   { 400: "#818cf8", 500: "#6366f1", 600: "#4f46e5", 700: "#4338ca" },
+            emerald: { 400: "#34d399", 500: "#10b981", 600: "#059669" },
+            rose:    { 400: "#fb7185", 500: "#f43f5e", 600: "#e11d48" },
+            surface: { 950: "#05080f", 900: "#0a0f1e", 850: "#0d1526", 800: "#111827", 700: "#1f2937", 600: "#374151" },
+            ink:     { 400: "#94a3b8", 300: "#cbd5e1", 200: "#e2e8f0" },
+          },
+          animation: {
+            "spin-slow":  "spin 1.5s linear infinite",
+            "pulse-soft": "pulseSoft 2.5s ease-in-out infinite",
+            "fade-up":    "fadeUp 0.45s cubic-bezier(0.16,1,0.3,1) forwards",
+            "fade-in":    "fadeIn 0.3s ease forwards",
+            "bar-grow":   "barGrow 0.8s cubic-bezier(0.16,1,0.3,1) forwards",
+          },
+          keyframes: {
+            pulseSoft: { "0%,100%": { opacity: "0.6" }, "50%": { opacity: "1" } },
+            fadeUp:    { "0%": { opacity: "0", transform: "translateY(18px)" }, "100%": { opacity: "1", transform: "translateY(0)" } },
+            fadeIn:    { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
+            barGrow:   { "0%": { width: "0%" }, "100%": { width: "var(--bar-width)" } },
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- ── Global CSS ──────────────────────────────────────────────────────── -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      background-color: #05080f;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(99,102,241,0.12) 0%, transparent 70%),
+        linear-gradient(rgba(99,102,241,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99,102,241,0.025) 1px, transparent 1px);
+      background-size: 100% 100%, 44px 44px, 44px 44px;
+      min-height: 100vh;
+      font-family: "Inter", sans-serif;
+      color: #e2e8f0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::-webkit-scrollbar             { width: 5px; }
+    ::-webkit-scrollbar-track       { background: #0a0f1e; }
+    ::-webkit-scrollbar-thumb       { background: #374151; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #6366f1; }
+
+    .glass {
+      background: rgba(13, 21, 38, 0.72);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .glass-lighter {
+      background: rgba(17, 24, 39, 0.55);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.07);
+    }
+
+    .review-textarea {
+      font-family: "Inter", sans-serif;
+      resize: vertical;
+      min-height: 160px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      line-height: 1.75;
+    }
+    .review-textarea:focus {
+      outline: none;
+      border-color: #6366f1 !important;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.18);
+    }
+    .review-textarea::placeholder { color: #475569; }
+
+    /* Animated confidence bar */
+    .conf-track {
+      height: 6px;
+      border-radius: 99px;
+      background: rgba(255,255,255,0.06);
+      overflow: hidden;
+    }
+    .conf-fill {
+      height: 100%;
+      border-radius: 99px;
+      transition: width 0.85s cubic-bezier(0.16,1,0.3,1);
+    }
+
+    /* Spinner ring */
+    @keyframes spinRing {
+      to { transform: rotate(360deg); }
+    }
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.15);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spinRing 0.75s linear infinite;
+      display: inline-block;
+    }
+
+    /* Dot pulse loader */
+    @keyframes dotBounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+      40%            { transform: translateY(-5px); opacity: 1; }
+    }
+    .dot-pulse span {
+      display: inline-block;
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: #fff;
+      margin: 0 2px;
+      animation: dotBounce 1.2s ease-in-out infinite;
+    }
+    .dot-pulse span:nth-child(2) { animation-delay: 0.15s; }
+    .dot-pulse span:nth-child(3) { animation-delay: 0.30s; }
+
+    /* Glow rings on online badge */
+    @keyframes ringExpand {
+      0% { transform: scale(1); opacity: 0.5; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+    .online-ring::before {
+      content: "";
+      position: absolute;
+      inset: -3px; border-radius: 50%;
+      border: 1px solid #10b981;
+      animation: ringExpand 1.8s ease-out infinite;
+    }
+
+    /* Sentiment glow border */
+    .result-positive { border-color: rgba(16,185,129,0.35); box-shadow: 0 0 30px rgba(16,185,129,0.06); }
+    .result-negative { border-color: rgba(244,63,94,0.35);  box-shadow: 0 0 30px rgba(244,63,94,0.06); }
+
+    @media (max-width: 640px) {
+      .review-textarea { min-height: 130px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useCallback, useRef, useEffect } = React;
+
+    /* ── Constants ───────────────────────────────────────────────────────── */
+    const MAX_CHARS    = 5_000;
+    const API_ENDPOINT = "/api/v1/analyze";
+
+    const EXAMPLE_POSITIVE = `This film is an absolute masterpiece of modern cinema. The direction is confident and assured, the performances are career-defining, and the screenplay crackles with intelligence and wit. Every frame is composed with exquisite care. I left the theatre genuinely moved — a rare, transcendent experience that reminded me why I love movies.`;
+
+    const EXAMPLE_NEGATIVE = `A catastrophic waste of everyone's time and money. The plot is incoherent, the characters are cardboard cutouts, and the dialogue sounds like it was generated by a bot. The CGI looks cheaper than a TV commercial and the pacing drags every scene into the ground. One of the worst films I have sat through in years — I want my two hours back.`;
+
+    /* ── Utility helpers ─────────────────────────────────────────────────── */
+    function pct(conf) {
+      return `${(conf * 100).toFixed(1)}%`;
+    }
+
+    /* ── Icon components ─────────────────────────────────────────────────── */
+    function IconSparkles({ cls = "w-4 h-4" }) {
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2l2.4 7.2H22l-6.2 4.5 2.4 7.2L12 16.5l-6.2 4.4 2.4-7.2L2 9.2h7.6z"/>
+        </svg>
+      );
+    }
+    function IconX({ cls = "w-4 h-4" }) {
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      );
+    }
+    function IconCheck({ cls = "w-5 h-5" }) {
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      );
+    }
+    function IconAlert({ cls = "w-5 h-5" }) {
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      );
+    }
+    function IconBrain({ cls = "w-5 h-5" }) {
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-1.07-4.73A3 3 0 0 1 4 11a3 3 0 0 1 2.5-2.96V8a2.5 2.5 0 0 1 3-2.45V4.5A2.5 2.5 0 0 1 9.5 2z"/>
+          <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 1.07-4.73A3 3 0 0 0 20 11a3 3 0 0 0-2.5-2.96V8a2.5 2.5 0 0 0-3-2.45V4.5A2.5 2.5 0 0 0 14.5 2z"/>
+        </svg>
+      );
+    }
+    function IconThumbUp({ cls = "w-6 h-6" }) {
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+          <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+        </svg>
+      );
+    }
+    function IconThumbDown({ cls = "w-6 h-6" }) {
+      return (
+        <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+          <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+        </svg>
+      );
+    }
+
+    /* ── Header ──────────────────────────────────────────────────────────── */
+    function Header({ apiOnline }) {
+      return (
+        <header className="sticky top-0 z-50 border-b border-white/[0.05]"
+          style={{ background: "rgba(5,8,15,0.85)", backdropFilter: "blur(20px)" }}>
+          <div className="max-w-3xl mx-auto px-5 py-3.5 flex items-center justify-between gap-4">
+            {/* Brand */}
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="relative flex-shrink-0">
+                <div className="absolute inset-0 rounded-lg bg-brand-500/25 blur-md" />
+                <div className="relative w-9 h-9 rounded-lg bg-surface-800 border border-brand-500/30 flex items-center justify-center">
+                  <IconBrain cls="w-4.5 h-4.5 text-brand-400" />
+                </div>
+              </div>
+              <div className="min-w-0">
+                <div className="font-black text-base tracking-tight text-white leading-none">CANTILEVER</div>
+                <div className="text-[10px] font-medium text-ink-400 tracking-wide mt-0.5 leading-none">Neural Sentiment Analysis</div>
+              </div>
+            </div>
+
+            {/* Right side */}
+            <div className="flex items-center gap-3 flex-shrink-0">
+              <span className="hidden sm:inline text-[10px] font-mono text-surface-600 border border-surface-700 rounded px-2 py-0.5">
+                sentiment_lstm_v1
+              </span>
+              {/* Online badge */}
+              <div className="flex items-center gap-1.5 text-xs font-semibold">
+                <div className="relative flex items-center justify-center w-2 h-2">
+                  <span className={`absolute inset-0 rounded-full ${apiOnline ? "bg-emerald-500" : "bg-rose-500"} ${apiOnline ? "online-ring" : ""}`} />
+                  <span className={`relative w-2 h-2 rounded-full ${apiOnline ? "bg-emerald-400" : "bg-rose-400"}`} />
+                </div>
+                <span className={apiOnline ? "text-emerald-400" : "text-rose-400"}>
+                  {apiOnline ? "ONLINE" : "OFFLINE"}
+                </span>
+              </div>
+            </div>
+          </div>
+        </header>
+      );
+    }
+
+    /* ── Character Counter ───────────────────────────────────────────────── */
+    function CharCounter({ count }) {
+      const ratio = count / MAX_CHARS;
+      const color = ratio >= 1 ? "text-rose-400" : ratio >= 0.85 ? "text-amber-400" : "text-surface-600";
+      return (
+        <span className={`font-mono text-xs tabular-nums transition-colors duration-200 ${color}`}>
+          {count.toLocaleString()} / {MAX_CHARS.toLocaleString()}
+        </span>
+      );
+    }
+
+    /* ── Example Buttons ─────────────────────────────────────────────────── */
+    function ExampleButtons({ onFill }) {
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-surface-600 font-medium mr-1">Try an example:</span>
+          <button
+            id="example-positive-btn"
+            onClick={() => onFill(EXAMPLE_POSITIVE)}
+            className="
+              inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+              bg-emerald-500/10 text-emerald-400 border border-emerald-500/20
+              hover:bg-emerald-500/20 hover:border-emerald-500/35
+              transition-all duration-150 active:scale-95
+            "
+          >
+            <IconThumbUp cls="w-3.5 h-3.5" />
+            Positive Review
+          </button>
+          <button
+            id="example-negative-btn"
+            onClick={() => onFill(EXAMPLE_NEGATIVE)}
+            className="
+              inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold
+              bg-rose-500/10 text-rose-400 border border-rose-500/20
+              hover:bg-rose-500/20 hover:border-rose-500/35
+              transition-all duration-150 active:scale-95
+            "
+          >
+            <IconThumbDown cls="w-3.5 h-3.5" />
+            Negative Review
+          </button>
+        </div>
+      );
+    }
+
+    /* ── Spinner ─────────────────────────────────────────────────────────── */
+    function DotPulse() {
+      return (
+        <span className="dot-pulse" aria-hidden="true">
+          <span /><span /><span />
+        </span>
+      );
+    }
+
+    /* ── Error Banner ────────────────────────────────────────────────────── */
+    function ErrorBanner({ message, onDismiss }) {
+      return (
+        <div
+          id="error-banner"
+          role="alert"
+          aria-live="assertive"
+          className="
+            glass-lighter rounded-xl p-4 border border-rose-500/25
+            flex items-start gap-3 animate-fade-in
+          "
+        >
+          <div className="text-rose-400 flex-shrink-0 mt-0.5">
+            <IconAlert cls="w-4.5 h-4.5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-rose-400 mb-0.5">Analysis Failed</p>
+            <p className="text-xs text-ink-400 leading-relaxed">{message}</p>
+          </div>
+          <button
+            id="dismiss-error-btn"
+            onClick={onDismiss}
+            aria-label="Dismiss error"
+            className="text-surface-600 hover:text-ink-400 transition-colors flex-shrink-0 mt-0.5"
+          >
+            <IconX cls="w-4 h-4" />
+          </button>
+        </div>
+      );
+    }
+
+    /* ── Result Metadata Row ─────────────────────────────────────────────── */
+    function MetaRow({ label, value, mono = false }) {
+      return (
+        <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04] last:border-0">
+          <span className="text-[11px] text-surface-600 font-medium">{label}</span>
+          <span className={`text-[11px] text-ink-400 ${mono ? "font-mono" : ""}`}>{value}</span>
+        </div>
+      );
+    }
+
+    /* ── Result Card ─────────────────────────────────────────────────────── */
+    function ResultCard({ data }) {
+      const isPos  = data.sentiment === "Positive";
+      const confPct = Math.round(data.confidence * 100);
+
+      const accentColor = isPos ? "emerald" : "rose";
+      const borderCls   = isPos ? "result-positive" : "result-negative";
+      const bgGradient  = isPos
+        ? "radial-gradient(ellipse at top left, rgba(16,185,129,0.06) 0%, transparent 60%)"
+        : "radial-gradient(ellipse at top left, rgba(244,63,94,0.06) 0%, transparent 60%)";
+      const fillColor   = isPos ? "#10b981" : "#f43f5e";
+      const labelColor  = isPos ? "text-emerald-400" : "text-rose-400";
+      const badgeBg     = isPos ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-400"
+                                : "bg-rose-500/10 border-rose-500/25 text-rose-400";
+      const Icon        = isPos ? IconThumbUp : IconThumbDown;
+
+      return (
+        <div
+          id="result-card"
+          className={`glass rounded-2xl border ${borderCls} overflow-hidden animate-fade-up`}
+          style={{ background: "rgba(13,21,38,0.72)" }}
+          role="region"
+          aria-label="Sentiment Analysis Result"
+          aria-live="polite"
+        >
+          {/* Gradient wash */}
+          <div className="absolute inset-0 pointer-events-none" style={{ background: bgGradient }} aria-hidden="true" />
+
+          <div className="relative p-6 space-y-5">
+            {/* ── Verdict row ── */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-surface-600 font-bold mb-2">
+                  Neural Verdict
+                </p>
+                <div className={`flex items-center gap-3 ${labelColor}`}>
+                  <Icon cls="w-7 h-7" />
+                  <span
+                    id="sentiment-label"
+                    className="text-3xl font-black tracking-tight"
+                  >
+                    {data.sentiment}
+                  </span>
+                </div>
+              </div>
+
+              {/* Confidence box */}
+              <div
+                id="confidence-box"
+                className={`flex-shrink-0 rounded-xl border px-4 py-3 text-right ${badgeBg}`}
+              >
+                <div className="text-[10px] text-surface-600 font-medium mb-1">Confidence</div>
+                <div
+                  id="confidence-value"
+                  className="text-2xl font-black font-mono tabular-nums"
+                >
+                  {pct(data.confidence)}
+                </div>
+              </div>
+            </div>
+
+            {/* ── Confidence bar ── */}
+            <div>
+              <div className="flex justify-between text-[10px] text-surface-600 font-mono mb-1.5">
+                <span>Signal Strength</span>
+                <span>{confPct}%</span>
+              </div>
+              <div className="conf-track">
+                <div
+                  id="confidence-bar"
+                  className="conf-fill"
+                  style={{ width: `${confPct}%`, background: fillColor }}
+                  role="progressbar"
+                  aria-valuenow={confPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`Model confidence: ${pct(data.confidence)}`}
+                />
+              </div>
+            </div>
+
+            {/* ── Metadata table ── */}
+            <div className="glass-lighter rounded-xl px-4 py-1 space-y-0">
+              <MetaRow label="Inference Time" value={`${data.latency_ms} ms`} mono />
+              <MetaRow label="Request ID"     value={data.request_id}         mono />
+              <MetaRow label="Model"          value={data.model}              mono />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── Empty State ─────────────────────────────────────────────────────── */
+    function EmptyState() {
+      return (
+        <div
+          id="empty-state"
+          className="glass-lighter rounded-2xl border border-white/[0.04] p-8 text-center animate-fade-in"
+          role="status"
+          aria-label="No analysis yet"
+        >
+          <div className="w-12 h-12 rounded-full bg-surface-800 border border-white/[0.06] flex items-center justify-center mx-auto mb-3">
+            <IconSparkles cls="w-5 h-5 text-surface-600" />
+          </div>
+          <p className="text-sm font-semibold text-surface-600 mb-1">No review analysed yet</p>
+          <p className="text-xs text-surface-600 leading-relaxed max-w-xs mx-auto">
+            Paste a movie review above and click <strong className="text-ink-400 font-semibold">Analyse Review</strong> to get an instant sentiment verdict.
+          </p>
+        </div>
+      );
+    }
+
+    /* ── Main App ─────────────────────────────────────────────────────────── */
+    function App() {
+      const [review,    setReview]    = useState("");
+      const [isLoading, setIsLoading] = useState(false);
+      const [result,    setResult]    = useState(null);
+      const [error,     setError]     = useState(null);
+      const [apiOnline, setApiOnline] = useState(true);
+      const textareaRef               = useRef(null);
+
+      const charCount = review.length;
+      const canSubmit = charCount > 0 && charCount <= MAX_CHARS && !isLoading;
+
+      // Poll /health on mount to set the online badge
+      useEffect(() => {
+        fetch("/health")
+          .then(r => setApiOnline(r.ok))
+          .catch(() => setApiOnline(false));
+      }, []);
+
+      const handleClear = useCallback(() => {
+        setReview("");
+        setResult(null);
+        setError(null);
+        textareaRef.current?.focus();
+      }, []);
+
+      const handleFillExample = useCallback((text) => {
+        setReview(text);
+        setResult(null);
+        setError(null);
+        textareaRef.current?.focus();
+      }, []);
+
+      const handleAnalyze = useCallback(async () => {
+        if (!canSubmit) return;
+
+        setIsLoading(true);
+        setResult(null);
+        setError(null);
+
+        try {
+          const resp = await fetch(API_ENDPOINT, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ review }),
+          });
+
+          if (!resp.ok) {
+            if (resp.status === 422) {
+              throw new Error("Input validation failed. Your review must be between 1 and 5,000 characters.");
+            }
+            if (resp.status >= 500) {
+              throw new Error("The inference server encountered an internal error. Please try again in a moment.");
+            }
+            throw new Error(`Unexpected server response (HTTP ${resp.status}). Please try again.`);
+          }
+
+          const data = await resp.json();
+          setResult(data);
+          setApiOnline(true);
+
+        } catch (err) {
+          if (err instanceof TypeError && err.message.includes("fetch")) {
+            setApiOnline(false);
+            setError("Unable to reach the analysis server. Please ensure main.py is running at localhost:8000.");
+          } else {
+            setError(err.message || "An unexpected error occurred. Please refresh and try again.");
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      }, [review, canSubmit]);
+
+      const handleKeyDown = useCallback((e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") handleAnalyze();
+      }, [handleAnalyze]);
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          <Header apiOnline={apiOnline} />
+
+          <main className="flex-1 max-w-3xl mx-auto w-full px-5 py-10 space-y-5">
+
+            {/* ── Hero ── */}
+            <div className="text-center pb-2 animate-fade-in">
+              <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-white leading-none mb-3">
+                Sentiment{" "}
+                <span className="text-transparent bg-clip-text" style={{
+                  backgroundImage: "linear-gradient(135deg, #818cf8 0%, #34d399 100%)"
+                }}>
+                  Intelligence
+                </span>
+              </h1>
+              <p className="text-sm text-ink-400 max-w-md mx-auto leading-relaxed">
+                Paste any movie review and get an instant AI verdict from a PyTorch LSTM
+                trained on <strong className="text-ink-300">50,000 IMDB reviews</strong>.
+              </p>
+            </div>
+
+            {/* ── Stats strip ── */}
+            <div className="grid grid-cols-3 gap-3 animate-fade-in">
+              {[
+                { label: "Test Accuracy", value: "86.61%" },
+                { label: "Max Input",     value: "5,000 chars" },
+                { label: "Model",         value: "2-Layer LSTM" },
+              ].map(({ label, value }) => (
+                <div key={label} className="glass-lighter rounded-xl px-4 py-3 text-center border border-white/[0.04]">
+                  <div className="font-black font-mono text-base text-white">{value}</div>
+                  <div className="text-[10px] text-surface-600 font-medium mt-0.5">{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* ── Input card ── */}
+            <div className="glass rounded-2xl p-6 space-y-4 animate-fade-in">
+
+              {/* Label row */}
+              <div className="flex items-center justify-between">
+                <label htmlFor="review-input" className="text-sm font-bold text-ink-200">
+                  Movie Review
+                </label>
+                <CharCounter count={charCount} />
+              </div>
+
+              {/* Textarea */}
+              <textarea
+                id="review-input"
+                ref={textareaRef}
+                value={review}
+                onChange={e => { setReview(e.target.value); setResult(null); setError(null); }}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading}
+                maxLength={MAX_CHARS}
+                placeholder="Paste your movie review here…"
+                aria-label="Movie review text input"
+                aria-describedby="input-footer"
+                className={`
+                  review-textarea w-full bg-surface-900/60 text-ink-200
+                  text-sm rounded-xl px-4 py-3 border
+                  ${charCount > MAX_CHARS ? "border-rose-500/50" : "border-white/[0.07]"}
+                  disabled:opacity-50 disabled:cursor-not-allowed
+                `}
+              />
+
+              {/* Footer row */}
+              <div
+                id="input-footer"
+                className="flex flex-wrap items-center justify-between gap-3"
+              >
+                <ExampleButtons onFill={handleFillExample} />
+                <p className="text-[10px] text-surface-600 font-mono">
+                  ⌘↵ to analyse · HTML auto-stripped
+                </p>
+              </div>
+
+              {/* Button row */}
+              <div className="flex gap-3">
+
+                {/* Analyze button */}
+                <button
+                  id="analyze-btn"
+                  onClick={handleAnalyze}
+                  disabled={!canSubmit}
+                  aria-disabled={!canSubmit}
+                  aria-label={isLoading ? "Analysing, please wait" : "Analyse sentiment"}
+                  className={`
+                    flex-1 py-3 px-6 rounded-xl font-bold text-sm
+                    flex items-center justify-center gap-2.5
+                    transition-all duration-200 select-none
+                    ${canSubmit
+                      ? "text-white shadow-lg shadow-brand-500/20 hover:shadow-brand-500/35 hover:scale-[1.015] active:scale-[0.99]"
+                      : "text-surface-600 bg-surface-800 border border-white/[0.05] cursor-not-allowed"
+                    }
+                  `}
+                  style={canSubmit ? {
+                    background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)"
+                  } : {}}
+                >
+                  {isLoading ? (
+                    <>
+                      <div className="spinner flex-shrink-0" />
+                      <span>Analysing</span>
+                      <DotPulse />
+                    </>
+                  ) : (
+                    <>
+                      <IconSparkles cls="w-4 h-4" />
+                      Analyse Review
+                    </>
+                  )}
+                </button>
+
+                {/* Clear button */}
+                {(review || result || error) && !isLoading && (
+                  <button
+                    id="clear-btn"
+                    onClick={handleClear}
+                    aria-label="Clear input and results"
+                    className="
+                      px-4 py-3 rounded-xl text-sm font-semibold
+                      text-ink-400 border border-white/[0.07] bg-surface-800/60
+                      hover:bg-surface-700/60 hover:text-ink-200 hover:border-white/[0.12]
+                      transition-all duration-150 active:scale-95 flex items-center gap-2
+                    "
+                  >
+                    <IconX cls="w-4 h-4" />
+                    <span className="hidden sm:inline">Clear</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ── Error ── */}
+            {error && (
+              <ErrorBanner message={error} onDismiss={() => setError(null)} />
+            )}
+
+            {/* ── Result / Empty ── */}
+            {result && !error
+              ? <ResultCard data={result} />
+              : !error && <EmptyState />
+            }
+
+          </main>
+
+          {/* ── Footer ── */}
+          <footer className="border-t border-white/[0.04] py-4 px-6">
+            <p className="text-center text-[10px] text-surface-600 font-mono">
+              CANTILEVER v2.0 · PyTorch LSTM · FastAPI · React 18 · Zero Build ·{" "}
+              <a
+                href="/docs"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-brand-400/60 hover:text-brand-400 transition-colors"
+              >
+                API Docs ↗
+              </a>
+            </p>
+          </footer>
+        </div>
+      );
+    }
+
+    /* ── Mount ───────────────────────────────────────────────────────────── */
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>

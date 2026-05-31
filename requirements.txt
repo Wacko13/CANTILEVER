@@ -1,0 +1,6 @@
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+torch==2.8.0
+pydantic==2.13.4
+nltk==3.9.2
+numpy==2.0.2
