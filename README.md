@@ -1,4 +1,4 @@
-#  —Secure Neural Sentiment Analysis Dashboard
+# Secure Neural Sentiment Analysis Dashboard
 
 > **A production-grade, OWASP-hardened full-stack AI system** — bridging a custom-trained PyTorch LSTM neural network with an asynchronous FastAPI backend and a zero-build React 18 frontend, hardened from the ground up against the most critical web application security threats.
 
